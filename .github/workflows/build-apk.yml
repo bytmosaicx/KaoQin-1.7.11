@@ -24,12 +24,12 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Extract the fixed stable source ZIP
+      - name: Extract the 1.7.56 cloud backup source ZIP
         shell: bash
         run: |
           set -euo pipefail
-          ZIP_FILE="./KaoQin_1.7.55_CustomExportNotice.zip"
-          test -f "$ZIP_FILE" || { echo "Stable ZIP not found"; exit 1; }
+          ZIP_FILE="./KaoQin_1.7.56_CloudBackup.zip"
+          test -f "$ZIP_FILE" || { echo "1.7.56 source ZIP not found"; exit 1; }
           mkdir -p extracted
           unzip -q "$ZIP_FILE" -d extracted
           PROJECT_DIR="$(find extracted -type f -name settings.gradle -print -quit | xargs -r dirname)"
@@ -55,6 +55,9 @@ jobs:
 
       - name: Configure release signing
         shell: bash
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
         run: |
           set -euo pipefail
           cat >> "$PROJECT_DIR/app/build.gradle" <<'GRADLE'
@@ -84,14 +87,11 @@ jobs:
           gradle-version: '8.2'
 
       - name: Build signed release APK
-        env:
-          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
         run: gradle --no-daemon -p "$PROJECT_DIR" assembleRelease
 
       - name: Upload signed APK
         uses: actions/upload-artifact@v4
         with:
-          name: KaoQin-1.7.55-release-apk
+          name: KaoQin-1.7.56-CloudBackup-release-apk
           path: '**/build/outputs/apk/release/*.apk'
           if-no-files-found: error
