@@ -24,36 +24,74 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Find and extract source ZIP
+      - name: Extract the fixed stable source ZIP
         shell: bash
         run: |
           set -euo pipefail
-          ZIP_FILE="$(find . -maxdepth 1 -type f -iname '*.zip' -print -quit)"
-          if [ -z "$ZIP_FILE" ]; then
-            echo 'No source ZIP found in repository root.'
-            exit 1
-          fi
+          ZIP_FILE="./KaoQin_1.7.55_CustomExportNotice.zip"
+          test -f "$ZIP_FILE" || { echo "Stable ZIP not found"; exit 1; }
           mkdir -p extracted
           unzip -q "$ZIP_FILE" -d extracted
           PROJECT_DIR="$(find extracted -type f -name settings.gradle -print -quit | xargs -r dirname)"
-          if [ -z "$PROJECT_DIR" ]; then
-            echo 'settings.gradle not found inside source ZIP.'
-            exit 1
-          fi
+          test -n "$PROJECT_DIR" || { echo "settings.gradle not found"; exit 1; }
+          test -f "$PROJECT_DIR/app/build.gradle" || { echo "app/build.gradle not found"; exit 1; }
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
           echo "Android project: $PROJECT_DIR"
+
+      - name: Decode and verify signing key
+        shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+        run: |
+          set -euo pipefail
+          test -n "$KEYSTORE_BASE64" || { echo "Missing KEYSTORE_BASE64"; exit 1; }
+          test -n "$KEYSTORE_PASSWORD" || { echo "Missing KEYSTORE_PASSWORD"; exit 1; }
+          test -n "$KEY_ALIAS" || { echo "Missing KEY_ALIAS"; exit 1; }
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/kaoqin-release.jks"
+          keytool -list -keystore "$RUNNER_TEMP/kaoqin-release.jks" -storepass "$KEYSTORE_PASSWORD" -alias "$KEY_ALIAS" >/dev/null
+          echo "KEYSTORE_FILE=$RUNNER_TEMP/kaoqin-release.jks" >> "$GITHUB_ENV"
+
+      - name: Configure release signing
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat >> "$PROJECT_DIR/app/build.gradle" <<'GRADLE'
+
+          // CI release signing configuration; injected only during the GitHub Actions build.
+          android {
+              signingConfigs {
+                  release {
+                      storeFile file(System.getenv("KEYSTORE_FILE"))
+                      storePassword System.getenv("KEYSTORE_PASSWORD")
+                      keyAlias System.getenv("KEY_ALIAS")
+                      keyPassword System.getenv("KEYSTORE_PASSWORD")
+                  }
+              }
+              buildTypes {
+                  release {
+                      signingConfig signingConfigs.release
+                      minifyEnabled false
+                  }
+              }
+          }
+          GRADLE
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.2'
 
-      - name: Build debug APK
-        run: gradle --no-daemon -p "$PROJECT_DIR" assembleDebug
+      - name: Build signed release APK
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+        run: gradle --no-daemon -p "$PROJECT_DIR" assembleRelease
 
-      - name: Upload APK
+      - name: Upload signed APK
         uses: actions/upload-artifact@v4
         with:
-          name: KaoQin-1.7.11-debug-apk
-          path: '**/build/outputs/apk/debug/*.apk'
+          name: KaoQin-1.7.55-release-apk
+          path: '**/build/outputs/apk/release/*.apk'
           if-no-files-found: error
