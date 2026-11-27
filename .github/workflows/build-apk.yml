@@ -4,7 +4,7 @@ on:
   push:
     branches: [main, master]
     paths:
-      - '**.zip'
+      - 'KaoQin_*.zip'
       - '.github/workflows/build-apk.yml'
   workflow_dispatch:
 
@@ -24,19 +24,36 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Extract the 1.7.57 cloud backup source ZIP
+      - name: Find and extract source ZIP
         shell: bash
         run: |
           set -euo pipefail
-          ZIP_FILE="./KaoQin_1.7.57_CloudBackup_NetworkPermission.zip"
-          test -f "$ZIP_FILE" || { echo "1.7.57 source ZIP not found"; exit 1; }
+          mapfile -t ZIP_FILES < <(find . -maxdepth 1 -type f -name 'KaoQin_*.zip' -print | sort)
+          if [ "${#ZIP_FILES[@]}" -ne 1 ]; then
+            echo "::error::Expected exactly one KaoQin_*.zip in repository root, found ${#ZIP_FILES[@]}."
+            printf 'Found: %s\n' "${ZIP_FILES[@]:-none}"
+            exit 1
+          fi
+          ZIP_FILE="${ZIP_FILES[0]}"
+          echo "Using source: $ZIP_FILE"
           mkdir -p extracted
           unzip -q "$ZIP_FILE" -d extracted
           PROJECT_DIR="$(find extracted -type f \( -name settings.gradle -o -name settings.gradle.kts \) -print -quit | xargs -r dirname)"
-          test -n "$PROJECT_DIR" || { echo "settings.gradle or settings.gradle.kts not found"; exit 1; }
-          test -f "$PROJECT_DIR/app/build.gradle" || test -f "$PROJECT_DIR/app/build.gradle.kts" || { echo "app Gradle build file not found"; exit 1; }
+          test -n "$PROJECT_DIR" || { echo "::error::settings.gradle(.kts) not found"; exit 1; }
+          if [ -f "$PROJECT_DIR/app/build.gradle" ]; then
+            APP_BUILD="$PROJECT_DIR/app/build.gradle"
+          elif [ -f "$PROJECT_DIR/app/build.gradle.kts" ]; then
+            APP_BUILD="$PROJECT_DIR/app/build.gradle.kts"
+          else
+            echo "::error::app/build.gradle(.kts) not found"
+            exit 1
+          fi
+          VERSION_NAME="$(grep -E 'versionName[[:space:]]+["'\''][^"'\'']+["'\'']|versionName[[:space:]]*=[[:space:]]*["'\''][^"'\'']+["'\'']' "$APP_BUILD" | head -n 1 | sed -E 's/.*versionName[[:space:]]*=?[[:space:]]*["'\'']([^"'\'']+)["'\''].*/\1/' || true)"
+          VERSION_NAME="${VERSION_NAME:-$(basename "$ZIP_FILE" .zip | sed -E 's/^KaoQin_([^_]+).*/\1/')}"
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
-          echo "Android project: $PROJECT_DIR"
+          echo "APP_BUILD=$APP_BUILD" >> "$GITHUB_ENV"
+          echo "VERSION_NAME=$VERSION_NAME" >> "$GITHUB_ENV"
+          echo "Detected app version: $VERSION_NAME"
 
       - name: Decode and verify signing key
         shell: bash
@@ -46,18 +63,25 @@ jobs:
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
         run: |
           set -euo pipefail
-          test -n "$KEYSTORE_BASE64" || { echo "Missing KEYSTORE_BASE64"; exit 1; }
-          test -n "$KEYSTORE_PASSWORD" || { echo "Missing KEYSTORE_PASSWORD"; exit 1; }
-          test -n "$KEY_ALIAS" || { echo "Missing KEY_ALIAS"; exit 1; }
+          test -n "$KEYSTORE_BASE64" || { echo "::error::Missing KEYSTORE_BASE64"; exit 1; }
+          test -n "$KEYSTORE_PASSWORD" || { echo "::error::Missing KEYSTORE_PASSWORD"; exit 1; }
+          test -n "$KEY_ALIAS" || { echo "::error::Missing KEY_ALIAS"; exit 1; }
           printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/kaoqin-release.jks"
           keytool -list -keystore "$RUNNER_TEMP/kaoqin-release.jks" -storepass "$KEYSTORE_PASSWORD" -alias "$KEY_ALIAS" >/dev/null
           echo "KEYSTORE_FILE=$RUNNER_TEMP/kaoqin-release.jks" >> "$GITHUB_ENV"
 
       - name: Configure release signing
         shell: bash
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
         run: |
           set -euo pipefail
-          cat >> "$PROJECT_DIR/app/build.gradle" <<'GRADLE'
+          if [[ "$APP_BUILD" == *.kts ]]; then
+            echo "::error::This workflow's signing injection currently expects app/build.gradle (Groovy), not build.gradle.kts."
+            exit 1
+          fi
+          cat >> "$APP_BUILD" <<'GRADLE'
 
           // CI release signing configuration; injected only during the GitHub Actions build.
           android {
@@ -92,6 +116,6 @@ jobs:
       - name: Upload signed APK
         uses: actions/upload-artifact@v4
         with:
-          name: KaoQin-1.7.57-CloudBackup-release-apk
+          name: KaoQin-${{ env.VERSION_NAME }}-release-apk
           path: '**/build/outputs/apk/release/*.apk'
           if-no-files-found: error
