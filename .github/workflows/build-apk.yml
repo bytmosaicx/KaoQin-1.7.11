@@ -86,7 +86,10 @@ jobs:
         with:
           gradle-version: '8.2'
 
-      - name: Build signed release APK
+            - name: Build signed release APK
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
         run: gradle --no-daemon -p "$PROJECT_DIR" assembleRelease
 
       - name: Upload signed APK
