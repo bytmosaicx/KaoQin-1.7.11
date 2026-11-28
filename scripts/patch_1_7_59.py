@@ -48,9 +48,9 @@ s = replace_function(s, "cloudRestoreNow", restore)
 html.write_text(s, encoding="utf-8")
 
 g = gradle.read_text(encoding="utf-8")
-g, c = re.subn(r"versionCode\s+69", "versionCode 70", g, count=1)
+g, c = re.subn(r"versionCode\s+68", "versionCode 70", g, count=1)
 g, n = re.subn(r"versionName\s+'1\.7\.59'", "versionName '1.7.60'", g, count=1)
 if c != 1 or n != 1:
-    raise SystemExit("版本号不是预期的 1.7.59，停止修改")
+    raise SystemExit("版本号不是预期的 1.7.58，停止修改")
 gradle.write_text(g, encoding="utf-8")
 print("Applied 1.7.60 clickable restore and legacy fallback patch")
