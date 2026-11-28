@@ -6,6 +6,7 @@ on:
     paths:
       - 'KaoQin_*.zip'
       - '.github/workflows/build-apk.yml'
+      - 'scripts/patch_1_7_59.py'
   workflow_dispatch:
 
 permissions:
@@ -54,6 +55,9 @@ jobs:
           echo "APP_BUILD=$APP_BUILD" >> "$GITHUB_ENV"
           echo "VERSION_NAME=$VERSION_NAME" >> "$GITHUB_ENV"
           echo "Detected app version: $VERSION_NAME"
+
+      - name: Apply 1.7.59 cloud backup history patch
+        run: python3 scripts/patch_1_7_59.py "$PROJECT_DIR"
 
       - name: Decode and verify signing key
         shell: bash
